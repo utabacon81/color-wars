@@ -385,30 +385,38 @@ function nearestEnemyPiece(team, x, y, maxD) {
   return best;
 }
 function fire(team, kind, opts = {}) {
-  const speed = { pew:640, rocket:360, bomb:250, nuke:190 }[kind];
+  const speed = { pew:640, rocket:380, bomb:260, nuke:200 }[kind];
   const R = { pew:0, rocket:12, bomb:22, nuke:48 }[kind];
-  let tg = null, pt = null, tx, ty;
-  if (team === ME && aimPt) { pt = { x:aimPt.x, y:aimPt.y }; tx = pt.x; ty = pt.y; }  // the player's aimed shot
-  else { tg = opts.target || randomTarget(team); if (!tg) return; const tp = piecePos(tg.o, tg.p); tx = tp.x; ty = tp.y; }
-  const t = TURRET[team]; t.ang = Math.atan2(ty - t.y, tx - t.x); t.kick = 1;
-  const lp = launchPoint(team);
-  const spread = kind === 'rocket' ? (pt ? 0.9 : 1.6) : kind === 'pew' && pt ? 0.06 : 0;
+  const aimed = team === ME && !!aimPt;   // player's shots always follow the live crosshair
+  let tg = null;
+  if (!aimed) { tg = opts.target || randomTarget(team); if (!tg) return; }
+  shots.push({ team, kind, R, x:0, y:0, vx:0, vy:0, speed, tg, aimed, delay: opts.delay || 0, age:0, launched:false });
+}
+// A shot leaves the cannon when its turn in a burst comes up, aimed at wherever the crosshair is right then.
+function launch(s) {
+  s.launched = true;
+  let tx, ty;
+  if (s.aimed && aimPt) { tx = aimPt.x; ty = aimPt.y; }
+  else { if (!s.tg || !s.tg.p.alive) s.tg = randomTarget(s.team); if (!s.tg) { s.done = true; return; } const tp = piecePos(s.tg.o, s.tg.p); tx = tp.x; ty = tp.y; }
+  const t = TURRET[s.team]; t.ang = Math.atan2(ty - t.y, tx - t.x); t.kick = 1;
+  const lp = launchPoint(s.team); s.x = lp.x; s.y = lp.y;
+  const spread = s.kind === 'rocket' ? (s.aimed ? 0.35 : 1.6) : 0;
   const a = t.ang + (Math.random() - 0.5) * spread;
-  shots.push({ team, kind, R, x:lp.x, y:lp.y, vx:Math.cos(a)*speed, vy:Math.sin(a)*speed, speed, tg, pt, delay: opts.delay || 0, age:0 });
+  s.vx = Math.cos(a) * s.speed; s.vy = Math.sin(a) * s.speed;
 }
 function updateShots(dt) {
   for (const s of shots) {
     if (s.delay > 0) { s.delay -= dt; continue; }
+    if (!s.launched) { launch(s); if (s.done) continue; }
     s.age += dt;
-    if (s.pt) {
-      // aimed shot: pew flies straight; others steer to the crosshair
+    if (s.aimed && aimPt) {
+      // pew flies dead straight from the cannon; everything else steers to the crosshair, even if it moves
       if (s.kind !== 'pew') {
-        turnToward(s, s.pt.x, s.pt.y, s.kind === 'rocket' ? 6 : 3, dt);
-        const d = Math.hypot(s.pt.x - s.x, s.pt.y - s.y);
-        if (s.kind === 'rocket' && d < 45) { const n = nearestEnemyPiece(s.team, s.pt.x, s.pt.y, 70); if (n) { s.tg = n; s.pt = null; } }
-        if (s.pt && d < s.speed * dt + 4) { s.x = s.pt.x; s.y = s.pt.y; s.done = true; explode(s); continue; }
+        turnToward(s, aimPt.x, aimPt.y, s.kind === 'rocket' ? 9 : 6, dt);
+        const d = Math.hypot(aimPt.x - s.x, aimPt.y - s.y);
+        if (d < s.speed * dt + 4) { s.x = aimPt.x; s.y = aimPt.y; s.done = true; explode(s); continue; }
       }
-    } else if (s.kind !== 'pew') {
+    } else if (!s.aimed && s.kind !== 'pew') {
       if (!s.tg || !s.tg.p.alive) s.tg = randomTarget(s.team);
       if (s.tg) { const tp = piecePos(s.tg.o, s.tg.p); turnToward(s, tp.x, tp.y, s.kind === 'rocket' ? 5 : 2.2, dt); }
     }
@@ -626,7 +634,7 @@ function drawField() {
   }
   // shots
   for (const s of shots) {
-    if (s.delay > 0) continue;
+    if (s.delay > 0 || !s.launched) continue;
     const col = teamColor[s.team], a = Math.atan2(s.vy, s.vx);
     ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(a);
     if (s.kind === 'pew') { ctx.fillStyle = '#fff'; ctx.fillRect(-7, -2, 14, 4); ctx.fillStyle = col.c; ctx.fillRect(-7, -1, 8, 2); }

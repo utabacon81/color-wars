@@ -94,6 +94,7 @@ const FC = (FX0 + FX1) / 2;
 const BALL_R = 5.5, SLOT_TOP = 392, SLOT_BOT = 470, SLOT_W = BW / SLOTS.length;
 const MAX_BALLS = 14, PLAYER_DROP = 1.4, PIECE = 9;
 const ME = 0, AI = 1;
+const AI_POWER = 0.8; // small built-in advantage for the player
 
 let myColor = 1, level = 0, teamColor = [COLORS[1], COLORS[6]];
 let boards, objs, shots, particles, debris, popups, beams, confetti;
@@ -283,7 +284,12 @@ function updateBoard(b, dt) {
   else { b.aiTimer -= dt; if (b.aiTimer <= 0) { b.aiTimer = 1 + Math.random() * 2; b.targetX = 14 + Math.random() * (BW - 28); } }
   b.dropX += (b.targetX - b.dropX) * Math.min(1, dt * 8);
   b.dropTimer -= dt;
-  if (b.dropTimer <= 0) { b.dropTimer = b.team === ME ? PLAYER_DROP : LEVELS[level].aiDrop; dropBall(b, b.dropX); }
+  if (b.dropTimer <= 0) {
+    // Hidden helper: if he falls behind, his balls drop faster until he catches up
+    const behind = countPieces(ME) / totals[ME] < countPieces(AI) / totals[AI] - 0.08;
+    b.dropTimer = b.team === ME ? PLAYER_DROP * (behind ? 0.7 : 1) : LEVELS[level].aiDrop;
+    dropBall(b, b.dropX);
+  }
   for (const bu of C.bumpers) bu.f = Math.max(0, bu.f - dt * 4);
   for (let i = 0; i < b.slotFlash.length; i++) b.slotFlash[i] = Math.max(0, b.slotFlash[i] - dt * 2.5);
   const steps = 6, h = dt / steps;
@@ -386,7 +392,7 @@ function nearestEnemyPiece(team, x, y, maxD) {
 }
 function fire(team, kind, opts = {}) {
   const speed = { pew:640, rocket:380, bomb:260, nuke:200 }[kind];
-  const R = { pew:0, rocket:12, bomb:22, nuke:48 }[kind];
+  const R = { pew:0, rocket:12, bomb:22, nuke:48 }[kind] * (team === AI ? AI_POWER : 1);  // computer's blasts are a bit smaller
   const aimed = team === ME && !!aimPt;   // player's shots always follow the live crosshair
   let tg = null;
   if (!aimed) { tg = opts.target || randomTarget(team); if (!tg) return; }
@@ -472,7 +478,7 @@ function laser(team) {
       const rx = q.x - t.x, ry = q.y - t.y, along = rx*ux + ry*uy, across = Math.abs(rx*uy - ry*ux);
       if (along > 0 && across < 11) list.push({ o, p, along }); } }
   list.sort((a, b) => a.along - b.along);
-  list.slice(0, 10).forEach(h => breakPiece(h.o, h.p, ux * 400, uy * 400));
+  list.slice(0, team === AI ? 7 : 10).forEach(h => breakPiece(h.o, h.p, ux * 400, uy * 400));
   beams.push({ team, x0:t.x, y0:t.y, ang:t.ang, life:0.5 });
   shake = Math.max(shake, 6); noise(0.4, 0.14, 2400); beep(team === ME ? 1800 : 1400, 0.3, 'sawtooth', 0, 0.04);
 }
